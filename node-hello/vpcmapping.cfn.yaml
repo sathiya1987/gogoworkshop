@@ -1,0 +1,16 @@
+  VpcMap:
+  #NonProduction-VPC
+    NonProduction:
+      VpcId: 
+      VpcCidr: 10.0.0.0/16
+      PrivateSubnets: subnet-id,subnet-id
+      PrivateSubnetCidrs: 10.132.148.0/23,10.132.150.0/23
+      PrivateRouteTableID: rtb-id
+      PublicSubnets: subnet-,subnet-id
+      PublicSubnetCidrs: 10.132.144.0/24,10.132.145.0/24
+      PublicRouteTableID: rtb-0fe335d4ac9b51708
+      LambdaSubnets: subnet-id,subnet-id
+      LambdaSubnetCidrs: 10.132.146.0/24,10.132.147.0/24
+      LambdaRouteTableID: rtb-id
+      AZs: eu-west-1a,eu-west-1b
+

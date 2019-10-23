@@ -1,0 +1,182 @@
+Description: >
+  Implement hello world Resources
+
+Metadata:
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+      - Label:
+          default: CloudFormation Configuration
+        Parameters:
+          - TemplateS3Location
+      # Blueprint Specific Parameters
+      - Label:
+          default: SNS Configuration
+        Parameters:
+          - OperationsEmail
+      - Label:
+          default: ECS Configuration
+        Parameters:
+          - VPC
+          - ECSInstanceType
+          - ClusterSize
+          - CertificateArn
+          - Environment
+      - Label:
+          default: OPTIONAL - Image Overides
+        Parameters:
+          - TraefikDockerImageOverride
+          - ClairDockerImageOverride
+
+
+    ParameterLabels:
+      TemplateS3Location:
+        default: Template S3 Location
+
+      # Blueprint Specific Parameters
+      OperationsEmail:
+        default: Operations Email Address
+      VPC:
+        default: VPC
+      ClusterSize:
+        default: Cluster Size
+      ECSInstanceType:
+        default: ECS Instance Type
+      CertificateArn:
+        default: SSL Certificate
+      Environment:
+        default: Environment
+      TraefikDockerImageOverride:
+        default: Traefik
+      ClairDockerImageOverride:
+        default: Clair
+
+      
+
+Parameters:
+  TemplateS3Location:
+    Type: String
+    Default: 'node-hello'
+    Description: 'The location which stores the templates used in the CloudFormation blueprint'
+
+  #========================================================================================
+  # Stack Blueprint Parameters - Different for each blueprint implementation
+  #========================================================================================
+  OperationsEmail:
+    Description: Provide the Operations Email Id to which Cloudwatch Alarm Notifications needs to be sent
+    Type: String
+    Default: ''
+    AllowedPattern: '^([a-zA-Z0-9_\-\.]+)@([a-zA-Z0-9_\-\.]+)\.([a-zA-Z]{2,5})$'
+    ConstraintDescription: Must be a valid email address
+  VPC:
+    Description: Specify the VPC in which to provision the Resources
+    Type: String
+    Default: 'NNA-Sandbox'
+    AllowedValues:
+      - 'Production'
+      - 'NonProduction'
+      - 'Sandbox'
+  ClusterSize:
+    Type: Number
+    Default: 2
+  ECSInstanceType:
+    AllowedValues:
+      - t2.small
+      - t2.medium
+      - t2.large
+      - t2.xlarge
+      - t2.2xlarge
+      - m3.large
+      - m3.xlarge
+      - m3.2xlarge
+      - m4.large
+      - m4.xlarge
+      - m4.2xlarge
+      - m4.4xlarge
+      - c4.xlarge
+    Default: m4.large
+    Description: Amazon EC2 instance type for the ECS instances
+    Type: String
+  CertificateArn:
+    Description: The Certificate ARN to be applied to the HTTPS App Load Balancer
+    Type: String
+    Default: '' # B2B-NonProd Account
+    # Needs to be RSA 2048-bit certs, not 4096!
+    # https://forums.aws.amazon.com/thread.jspa?messageID=830707&tstart=0
+  Environment:
+    Description: The Environment being deployed
+    Type: String
+    AllowedValues:
+      - tech
+      - dev
+      - qa
+      - prod
+    Default: dev
+  TraefikDockerImageOverride:
+    Description: Override Container Image - Leave blank for default image
+    Type: String
+    Default: ''
+  ClairDockerImageOverride:
+    Description: Override Container Image - Leave blank for default image
+    Type: String
+    Default: ''   
+  
+  #========================================================================================
+  # Tagging Parameters - Standard across all stack blueprints
+  #========================================================================================
+#  TAGName:                # This should be implemented resource by resource - Temp removed to discuss
+#    Description: Name that uniquely identifies the resource in a human readable form.
+#    Type: String
+#    MinLength: 1
+#    AllowedPattern: '^[0-9a-zA-Z]+([0-9a-zA-Z-]*[0-9a-zA-Z])*$'
+  
+
+Mappings:
+  'Fn::Transform':
+    Name: 'AWS::Include'
+    Parameters:
+      Location: !Sub s3://${TemplateS3Location}/vpcmapping.cfn.yaml
+
+Conditions:
+  UseS3Region:                    !Not [!Equals [!Ref 'AWS::Region', "us-east-1"]]
+
+Resources:
+  blueprint:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+
+      # Implment Blueprint
+      TemplateURL: !If [UseS3Region, !Sub 'https://s3-${AWS::Region}.amazonaws.com/${TemplateS3Location}/blueprint/blueprint.cfn.yml', !Sub 'https://s3.amazonaws.com/${TemplateS3Location}/blueprint/blueprint.cfn.yml'] 
+
+      # Blueprint specific parameters
+      Parameters:
+        TemplateS3Location:           !Ref TemplateS3Location
+        TemplateS3Region:             !If [UseS3Region, !Sub 's3-${AWS::Region}', "s3"] 
+        VpcId:                        !FindInMap [VpcMap, !Ref VPC, VpcId]
+        VpcCidr:                      !Join [",", !Split [",", !FindInMap [VpcMap, !Ref VPC, VpcCidr]]]
+        AvailabilityZone:             !Select
+                                        - 0
+                                        - !Split [",", !FindInMap [VpcMap, !Ref VPC, AZs]]
+        PrivateSubnets:               !Join [",", !Split [",", !FindInMap [VpcMap, !Ref VPC, PrivateSubnets]]]
+        PublicSubnets:                !Join [",", !Split [",", !FindInMap [VpcMap, !Ref VPC, PublicSubnets]]]
+        EnvironmentName:              !Ref AWS::StackName
+        OperationsEmail:              !Ref OperationsEmail
+        AlbType:                      internet-facing
+        ClusterSize:                  !Ref ClusterSize
+        ECSInstanceType:              !Ref ECSInstanceType
+        CertificateArn:               !Ref CertificateArn
+        KeyPairName:                  poc
+        Domain:                       na.nissancloud.com
+        Environment:                  !Ref Environment
+        TraefikDockerImageOverride:   !Ref TraefikDockerImageOverride
+        ClairDockerImageOverride:     !Ref ClairDockerImageOverride
+        ImplementTraefik:             "true"
+        ImplementClair:               "false"
+      
+
+
+      # Apply Tags at the highest level - automatically applied through all levels of the stack.
+      Tags:
+#      - Key: Name
+#        Value: !Ref TAGName
+      - Key: Environment
+        Value: !Ref Environment

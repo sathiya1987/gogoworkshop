@@ -1,0 +1,196 @@
+Description: >
+  CoreOS Clair service for ECR scanning
+
+Parameters:
+  ECSClusterName:
+    Type: String
+    Description: ECS Cluster ID that this service should run on.
+  EnvironmentName:
+    Description: An environment name that will be prefixed to resource names
+    Type: String
+  DbVpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID in which the database cluster will be deployed.
+  DbPrivateSubnets:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Private Subnet IDs for the database cluster.
+  ECSNodesSecurityGroupId:
+    Type: String
+    Description: Security Group of ECS Nodes for authorizing access to the database.
+  Domain:
+    Type: String
+    Description: Domain in which tasks should be registered to - MUST already exist as a zone in Route53
+    Default: na.nissancloud.com
+  Environment:
+    Type: String
+    AllowedValues:
+      - tech
+      - dev
+      - qa
+      - prod
+    Default: dev
+  DockerImageOverride:
+    Type: String
+    Description: The Repository URI for the docker image
+  SNSTopic:
+    Description: Provide the name of SNS Topic to which notifications to be sent
+    Type: String
+    Default: ''
+  TemplateS3Region:
+    Type: String
+  TemplateS3Location:
+    Type: String
+
+Conditions:
+  DefaultImage: !Equals [ !Ref DockerImageOverride, "" ]
+
+Resources:
+  ClairECSService:
+    Type: "AWS::ECS::Service"
+    DependsOn: ClairDbPrimaryInstance
+    Properties:
+      Cluster: !Ref ECSClusterName
+      DesiredCount: 1
+      TaskDefinition: !Ref ClairTaskDefinition
+
+  ClairTaskDefinition:
+    Type: "AWS::ECS::TaskDefinition"
+    Properties:
+      Family: coreos-clair
+      Cpu: "256"
+      Memory: "0.5GB"
+      ExecutionRoleArn: !Ref ClairEcsTaskExecutionRole
+      TaskRoleArn: !Ref ClairEcsTaskRole
+      ContainerDefinitions:
+        -                                         
+          Name: "clair"
+          Image: !If [ DefaultImage, "464598779341.dkr.ecr.us-east-1.amazonaws.com/clair:latest", !Ref DockerImageOverride ]
+          Essential: true
+          Environment:
+            - Name: DB_HOST
+              Value: !GetAtt [ClairDbCluster, Endpoint.Address]
+          PortMappings:
+            - ContainerPort: 6060
+              Protocol: tcp
+            # - ContainerPort: 6061  # HealthCheckPort
+            #   Protocol: tcp
+          DockerLabels:
+            traefik.frontend.rule: !Join
+              - ""
+              - - "Host:node-"
+                - !Ref Environment
+                - "."
+                - !Ref Domain
+            traefik.enable: 'true'
+            traefik.protocol: 'http'
+            traefik.port: '6060'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-create-group: 'true'
+              awslogs-group: !Sub ${ECSClusterName}-ContainerLogs
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: !Ref AWS::StackName
+
+  ClairEcsTaskExecutionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Action: "sts:AssumeRole"
+            Principal:
+              Service: "ecs-tasks.amazonaws.com"
+
+  ClairEcsTaskExecutionRolePolicy:
+    Type: "AWS::IAM::Policy"
+    Properties:
+      PolicyName: "ecs-execution"
+      Roles:
+        - Ref: "ClairEcsTaskExecutionRole"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Action:
+              - "ecr:GetAuthorizationToken"
+              - "ecr:BatchGetImage"
+              - "ecr:GetDownloadUrlForLayer"
+              - "ecr:BatchCheckLayerAvailability"
+              - "logs:CreateLogStream"
+              - "logs:PutLogEvents"
+            Resource: "*"
+
+  ClairEcsTaskRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Action: "sts:AssumeRole"
+            Principal:
+              Service: "ecs-tasks.amazonaws.com"
+
+  ClairDbPrimaryInstance:
+    Type: "AWS::RDS::DBInstance"
+    Properties:
+      Engine: aurora-postgresql
+      EngineVersion: "10.7"
+      DBClusterIdentifier: !Ref ClairDbCluster
+      DBInstanceClass: "db.t3.medium"
+      DBSubnetGroupName: !Ref ClairDbSubnetGroup
+      Tags:
+        - Key: Name
+          Value: ClairDB-Instance
+
+  ClairDbCluster:
+    Type: "AWS::RDS::DBCluster"
+    DeletionPolicy: Delete
+    Properties:
+      DBSubnetGroupName: !Ref ClairDbSubnetGroup
+      Engine: aurora-postgresql
+      EngineVersion: "10.7"
+      MasterUsername: postgres
+      MasterUserPassword: password
+      DatabaseName: postgres
+      DBClusterParameterGroupName: "default.aurora-postgresql10"
+      Port: 5432
+      VpcSecurityGroupIds: [!Ref ClairDbSecurityGroup]
+      Tags:
+        - Key: Name
+          Value: ClairDBCluster
+
+  ClairDbSubnetGroup:
+    Type: "AWS::RDS::DBSubnetGroup"
+    Properties:
+      DBSubnetGroupDescription: Subnet Group for Clair DB Cluster
+      SubnetIds: !Ref DbPrivateSubnets
+
+  ClairDbSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      VpcId: !Ref DbVpcId
+      GroupDescription: "CoreOS Clair RDS Cluster Security Group"
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref ECSNodesSecurityGroupId
+      Tags:
+        - Key: Name
+          Value: Clair-DB-SG
+  
+  ECSServiceCloudWatchAlarms:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Region}.amazonaws.com/${TemplateS3Location}/infrastructure/cloudwatch-alarms-ecs-service.cfn.yml
+      Parameters:
+        EnvironmentName: !Sub ${EnvironmentName}-Clair
+        ClusterName: !Ref ECSClusterName
+        ServiceName: !GetAtt ClairECSService.Name
+        SnsTopicName: !Ref SNSTopic

@@ -1,0 +1,35 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: AWS CloudFormation Template to provision SNS Topic and Subscription
+Parameters:
+  EnvironmentName:
+    Description: An environment name that will be prefixed to resource names
+    Type: String
+  OperationsEmail:
+    Description: Provide the Operations Email Id to which Cloudwatch Alarm Notifications needs to be sent
+    Type: String
+    Default: ndi.cloud@nissanmotor.com
+    AllowedPattern: '^([a-zA-Z0-9_\-\.]+)@([a-zA-Z0-9_\-\.]+)\.([a-zA-Z]{2,5})$'
+    ConstraintDescription: Must be a valid email address
+  
+Resources:
+  SNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: !Sub 'Alarm Alert for ${EnvironmentName}'
+      TopicName: !Sub ${EnvironmentName}
+  
+  SNSSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Endpoint: !Ref OperationsEmail
+      Protocol: email
+      TopicArn: !Ref SNSTopic
+
+Outputs:
+  SNSTopiArn:
+    Description: SNS topic ARN
+    Value: !Ref SNSTopic
+  SNSTopicName:
+    Description: The name of SNS topic
+    Value: !GetAtt SNSTopic.TopicName

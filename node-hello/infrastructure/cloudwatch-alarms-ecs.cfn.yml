@@ -1,0 +1,58 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: AWS CloudFormation Template to provision SNS Topic and Subscription
+Parameters:
+  EnvironmentName:
+    Description: An environment name that will be prefixed to resource names
+    Type: String
+  ClusterName:
+    Description: Provide the ECS Cluster Name for which the alarm needs to be created
+    Type: String
+    ConstraintDescription: Must be a valid ECS Cluster Name
+  SnsTopicName:
+    Description: Provide the arn of SNS Topic to which notifications needs to be sent
+    Type: String
+
+Resources:
+  CPUUtilizationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-ECS-Cluster-CPU-Utilization
+      AlarmDescription: CPU Utilization average >= 80% for 5 minutes, 3 consecutive times
+      MetricName: CPUUtilization
+      Statistic: Average
+      Period: 300
+      Threshold: 80
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 3
+      Namespace: AWS/ECS
+      ActionsEnabled: true
+      AlarmActions:
+      - !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${SnsTopicName}'
+      TreatMissingData: breaching
+      Dimensions:
+      - Name: ClusterName
+        Value: !Ref ClusterName
+
+  MemoryUtilizationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-ECS-Cluster-Memory-Utilization
+      AlarmDescription: Memory Utilization average >= 80% for 5 minutes, 3 consecutive times
+      MetricName: MemoryUtilization
+      Statistic: Average
+      Period: 300
+      Threshold: 80
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 3
+      Namespace: AWS/ECS
+      ActionsEnabled: true
+      AlarmActions:
+      - !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${SnsTopicName}'
+      TreatMissingData: breaching
+      Dimensions:
+      - Name: ClusterName
+        Value: !Ref ClusterName
+
+  
+

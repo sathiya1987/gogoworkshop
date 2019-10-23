@@ -1,0 +1,172 @@
+Description: >
+  This template will build the resources for NE Fleet Management which includes a highly scalable
+  ECS Cluster, S3 Bucket, Postgres RDS, SNS,SQS,ALB
+
+Parameters:
+  TemplateS3Region:
+    Type: String
+  TemplateS3Location:
+    Type: String
+  OperationsEmail:
+    Type: String
+  AlbType:
+    Type: String
+  VpcId:
+    Type: String
+  VpcCidr:
+    Type: String
+  PrivateSubnets:
+    Type: String
+  PublicSubnets:
+    Type: String
+  AvailabilityZone:
+    Type: String
+  ClusterSize:
+    Type: Number
+  ECSInstanceType:
+    Type: String
+#  Proxy:
+#    Type: String
+  CertificateArn:
+    Type: String
+  KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+  Domain:
+    Type: String
+  EnvironmentName:
+    Type: String
+  Environment:
+    Type: String
+  ImplementTraefik:
+    Type: String
+    AllowedValues:
+      - 'true'
+      - 'false'
+  ImplementClair:
+    Type: String
+    AllowedValues:
+      - 'true'
+      - 'false'
+  TraefikDockerImageOverride:
+    Description: Override Container Image
+    Type: String
+  ClairDockerImageOverride:
+    Description: Override Container Image
+    Type: String
+  AssociatePublicIpAddress:
+    Type: String
+    AllowedValues:
+      - 'true'
+      - 'false'
+    
+
+
+Conditions:
+  Traefik: !Equals [ !Ref ImplementTraefik, 'true' ]
+  Clair: !Equals [ !Ref ImplementClair, 'true' ]
+
+Resources:
+  SecurityGroups:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Region}.amazonaws.com/${TemplateS3Location}/infrastructure/security-groups.cfn.yml
+      Parameters:
+        EnvironmentName:                        !Ref EnvironmentName
+        VpcId:                                  !Ref VpcId
+ #       DBPort:                                 !Ref DBPort
+ 
+  SNSTopic:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Region}.amazonaws.com/${TemplateS3Location}/infrastructure/sns.cfn.yml
+      Parameters:
+        EnvironmentName:                        !Ref EnvironmentName
+        OperationsEmail:                        !Ref OperationsEmail
+
+  ALB:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Region}.amazonaws.com/${TemplateS3Location}/infrastructure/load-balancers.cfn.yml
+      Parameters:
+        EnvironmentName:                        !Ref EnvironmentName
+        VpcId:                                  !Ref VpcId
+        Subnets:                                !Ref PublicSubnets
+        SecurityGroup:                          !GetAtt SecurityGroups.Outputs.LoadBalancerSecurityGroup
+        AlbType:                                !Ref AlbType
+        CertificateArn:                         !Ref CertificateArn
+ 
+  ECSHostRole:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Region}.amazonaws.com/${TemplateS3Location}/infrastructure/ecs-iam-role.cfn.yml
+      Parameters:
+        EnvironmentName:                        !Ref EnvironmentName
+       
+
+  ECS:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Region}.amazonaws.com/${TemplateS3Location}/infrastructure/ecs-cluster.cfn.yml
+      Parameters:
+        EnvironmentName:                        !Ref EnvironmentName
+        InstanceType:                           !Ref ECSInstanceType
+        ClusterSize:                            !Ref ClusterSize
+        Subnets:                                !Ref PublicSubnets
+        KeyName:                                !Ref KeyPairName
+       # Proxy:                                  !Ref Proxy
+        SecurityGroups:                         !Join
+          - ","
+          - - !GetAtt SecurityGroups.Outputs.ECSHostSecurityGroup
+         #   - !Ref SharedServicesSGID
+        ECSInstanceProfile:                     !GetAtt ECSHostRole.Outputs.ECSHostInstanceProfile
+        SNSTopic:                               !GetAtt SNSTopic.Outputs.SNSTopicName
+        TemplateS3Location:                     !Ref TemplateS3Location
+        TemplateS3Region:                       !Ref TemplateS3Region
+        AssociatePublicIpAddress:               !Ref AssociatePublicIpAddress
+
+
+  TraefikService:
+    Type: AWS::CloudFormation::Stack
+    Condition: Traefik
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Region}.amazonaws.com/${TemplateS3Location}/services/traefik-service/service.cfn.yml
+      Parameters:
+        Cluster:                                !GetAtt ECS.Outputs.Cluster
+        EnvironmentName:                        !Ref EnvironmentName
+        TargetGroup:                            !GetAtt ALB.Outputs.TargetGroup
+        Domain:                                 !Ref Domain
+        Environment:                            !Ref Environment
+        DockerImageOverride:                    !Ref TraefikDockerImageOverride
+        SNSTopic:                               !GetAtt SNSTopic.Outputs.SNSTopicName
+        TemplateS3Location:                     !Ref TemplateS3Location
+        TemplateS3Region:                       !Ref TemplateS3Region
+
+  ClairService:
+    Type: AWS::CloudFormation::Stack
+    Condition: Clair
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Region}.amazonaws.com/${TemplateS3Location}/services/clair-service/service.cfn.yml
+      Parameters:
+        ECSClusterName:                         !GetAtt ECS.Outputs.Cluster
+        EnvironmentName:                        !Ref EnvironmentName
+        DbVpcId:                                !Ref VpcId
+        DbPrivateSubnets:                       !Ref PrivateSubnets
+        ECSNodesSecurityGroupId:                !GetAtt SecurityGroups.Outputs.ECSHostSecurityGroup
+        Domain:                                 !Ref Domain
+        Environment:                            !Ref Environment
+        DockerImageOverride:                    !Ref ClairDockerImageOverride
+        SNSTopic:                               !GetAtt SNSTopic.Outputs.SNSTopicName
+        TemplateS3Location:                     !Ref TemplateS3Location
+        TemplateS3Region:                       !Ref TemplateS3Region
+
+  LifecycleHook:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Region}.amazonaws.com/${TemplateS3Location}/infrastructure/lifecyclehook.cfn.yml
+      Parameters:
+        Cluster:                                !GetAtt ECS.Outputs.Cluster
+        ECSAutoScalingGroupName:                !GetAtt ECS.Outputs.ECSAutoScalingGroupName
+        EnvironmentName:                        !Ref EnvironmentName
+    
+  
+

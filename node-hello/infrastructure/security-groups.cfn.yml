@@ -1,0 +1,205 @@
+Description: >
+  This template contains the security groups required by our entire stack.
+  We create them in a seperate nested template, so they can be referenced
+  by all of the other nested templates.
+
+Parameters:
+  EnvironmentName:
+    Description: An environment name that will be prefixed to resource names
+    Type: String
+  VpcId:
+    Type: String
+    Description: Choose which VPC the security groups should be deployed to
+  DBPort:
+    Type: Number
+    Description: Provide the DB port number
+    Default: 5432
+  #PasswordRotationLambdaSGID:
+    #Description: Provide the group id of password rotation lambda security group
+    #Type: String
+
+Resources:  
+  # This security group defines who/where is allowed to access the ECS hosts directly.
+  ECSHostSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VpcId
+      GroupDescription: Access to the ECS hosts and the tasks/containers that run on them
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-ECS-Hosts-sg
+  
+  # Allow inbound access to ECS Host from the ALB
+  ECSHostSecurityGroupIngress1:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: !Sub ${EnvironmentName}-Ingress rules for access from ALB to ECS Host
+      GroupId: !Ref ECSHostSecurityGroup
+      IpProtocol: "-1"
+      SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
+
+  #  Allow inbound access from other ECS Hosts (Needed to reverse proxy via Traefik )
+  ECSHostSecurityGroupIngress2:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: !Sub ${EnvironmentName}-Ingress rules for access from other ECS Hosts
+      GroupId: !Ref ECSHostSecurityGroup
+      IpProtocol: "-1"
+      SourceSecurityGroupId: !Ref ECSHostSecurityGroup
+  ECSHostSecurityGroupIngress3:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: !Sub ${EnvironmentName}-Ingress rules for access from other ECS Hosts
+      GroupId: !Ref ECSHostSecurityGroup
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIp: 0.0.0.0/0
+  ECSHostSecurityGroupIngress4:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: !Sub ${EnvironmentName}-Ingress rules for access from other ECS Hosts
+      GroupId: !Ref ECSHostSecurityGroup
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      CidrIp: 0.0.0.0/0
+  #  Allow Outbound access from ECS Host to RDS instance
+  ECSHostSecurityGroupEgress1:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      Description: !Sub ${EnvironmentName}-Outbound from ECS to RDS
+      GroupId: !Ref ECSHostSecurityGroup
+      #Outbound to the Postresql RDS instance
+      IpProtocol: tcp
+      FromPort: !Ref DBPort
+      ToPort: !Ref DBPort
+      DestinationSecurityGroupId: !Ref RDSSecurityGroup 
+  ECSHostSecurityGroupEgress2:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      Description: !Sub ${EnvironmentName}-Outbound from ECS to RDS
+      GroupId: !Ref ECSHostSecurityGroup
+      #Outbound to the Postresql RDS instance
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIp: 0.0.0.0/0 
+  ECSHostSecurityGroupEgress3:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      Description: !Sub ${EnvironmentName}-Outbound from ECS to RDS
+      GroupId: !Ref ECSHostSecurityGroup
+      #Outbound to the Postresql RDS instance
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      CidrIp: 0.0.0.0/0
+
+  # This security group defines who/where is allowed to access the Application Load Balancer.
+  # By default, the inbound traffic will be via port 443(SSL) and is open to the public internet (0.0.0.0/0)
+  # and the outbound from ALB is restricted to ECS security group
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VpcId
+      GroupDescription: Access to the load balancer that sits in front of ECS
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-LoadBalancer-sg
+
+  LoadBalancerSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: !Sub ${EnvironmentName}-Ingress rules for LoadBalancer from Public internet
+      GroupId: !Ref LoadBalancerSecurityGroup
+      #Inbound access to the ALB from Internal Network
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIp: 0.0.0.0/0
+  LoadBalancerSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: !Sub ${EnvironmentName}-Ingress rules for LoadBalancer from Public internet
+      GroupId: !Ref LoadBalancerSecurityGroup
+      #Inbound access to the ALB from Internal Network
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      CidrIp: 0.0.0.0/0
+
+  LoadBalancerSecurityGroupEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      Description: !Sub ${EnvironmentName}-Egress rules for LoadBalancer to ECs
+      GroupId: !Ref LoadBalancerSecurityGroup
+     #Outbound access from the ALB to ECS Host
+      IpProtocol: "-1"
+      DestinationSecurityGroupId: !Ref ECSHostSecurityGroup
+
+  # This security group defines who/where is allowed to access the RDS (Database) instance.
+  # By default, we've restricted the connection within vpc where EC2 instance is hosted.  
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VpcId
+      GroupDescription: Access to the RDS instance from ECS
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-RDS-sg
+
+  RDSSecurityGroupIngress1:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: !Sub ${EnvironmentName}-Inbound from ECS Host
+      GroupId: !Ref RDSSecurityGroup
+     #Inbound access to the RDS instance from EC2
+      IpProtocol: tcp
+      FromPort: !Ref DBPort
+      ToPort: !Ref DBPort
+      SourceSecurityGroupId: !Ref ECSHostSecurityGroup
+
+  # This security group defines who/where is allowed to access the Elastic Cache Redis Node.
+  # By default, we've restricted the connection to the ECS Host Security Group  
+ 
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VpcId
+      GroupDescription: Access from Lambda Fucntion to RDS and Secrets Manager
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-lambda-sg
+  
+  LambdaSecurityGroupEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      Description: !Sub ${EnvironmentName}-Access to proxy server
+      GroupId: !Ref LambdaSecurityGroup
+      #Outbound access from Lambda to access internet
+      IpProtocol: tcp
+      FromPort: 0
+      ToPort: 65535
+      CidrIp: 0.0.0.0/0    
+
+      
+Outputs:
+  ECSHostSecurityGroup:
+    Description: A reference to the security group for ECS Host instance
+    Value: !Ref ECSHostSecurityGroup
+
+  LoadBalancerSecurityGroup:
+    Description: A reference to the security group for load balancers
+    Value: !Ref LoadBalancerSecurityGroup
+    
+  RDSSecurityGroup:
+    Description: A reference to the security group for RDS instance
+    Value: !Ref RDSSecurityGroup
+  
+
+  LambdaSecurityGroup:
+    Description: A reference to the security group for EFS
+    Value: !Ref LambdaSecurityGroup
+  
+

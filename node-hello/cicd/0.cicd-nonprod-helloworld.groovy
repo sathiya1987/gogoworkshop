@@ -143,7 +143,25 @@ pipeline {
                 }
             }
         }
-        
+	   
+        stage("Check image vulnerabilities") {
+            agent any
+            steps {
+                title "Check image vulnerabilities"
+                sh """#!/bin/bash -e
+                    ECR_LOGIN=\$(aws ecr get-login --region $REGION --no-include-email)
+                    \$ECR_LOGIN
+                    PASSWORD=\$(echo \$ECR_LOGIN | cut -d' ' -f6)
+                    REGISTRY=\$(echo \$ECR_LOGIN | cut -d' ' -f7 | sed 's/https:\\/\\///')
+                    ECR_REPOSITORY_URI=\$REGISTRY"/${imageName}:d-${env.GIT_COMMIT}"
+                    wget -q https://github.com/optiopay/klar/releases/download/v2.4.0/klar-2.4.0-linux-amd64
+                    mv ./klar-2.4.0-linux-amd64 ./klar
+                    chmod +x ./klar
+
+                    DOCKER_USER=AWS DOCKER_PASSWORD=\$PASSWORD CLAIR_ADDR=$CLAIR_URL CLAIR_OUTPUT=$CLAIR_THRESHOLD ./klar \$ECR_REPOSITORY_URI
+                """
+            }
+        }
         stage("Promotion#1") {
             steps {
                 timeout(time: 1, unit: 'HOURS') {

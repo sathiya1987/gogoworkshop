@@ -36,7 +36,7 @@ Parameters:
   ECSAMI:
     Description: ECS-Optimized AMI ID
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
-    Default: /aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id
+    Default: ami-0b69ea66ff7391e80
     #Default: ami-0b69ea66ff7391e80
 
   SNSTopic:

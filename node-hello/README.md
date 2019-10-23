@@ -32,5 +32,7 @@ Configured for: -
 
 all (no hardcoded AMI's)
 Todos
+Not configure notifications for Build fails/success
+
 Last Changed:
 Last Updated by:Sathiyaraj
